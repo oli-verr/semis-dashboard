@@ -483,6 +483,11 @@ def main() -> None:
     _seed_data("tsmc_revenue", "tsmc_revenue.csv", store.upsert_tsmc)
     _seed_data("korea_exports", "korea_exports.csv", store.upsert_korea)
 
+    # Seed GPU prices from the committed live snapshot (no sample fallback needed)
+    live_gpu = os.path.join(_LIVE_DIR, "gpu_spot_prices.csv")
+    if store.row_count("gpu_spot_prices") == 0 and os.path.exists(live_gpu):
+        store.upsert_gpu_prices(pd.read_csv(live_gpu))
+
     prices = _load_prices()
 
     st.title("AI / Semiconductor Trade Dashboard")
