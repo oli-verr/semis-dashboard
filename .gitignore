@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Data (keep samples for first-clone UX)
+data/*.db
+data/raw/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Virtual environment
+venv/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
