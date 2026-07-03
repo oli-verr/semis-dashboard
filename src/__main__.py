@@ -1,55 +1,75 @@
 """
-CLI entry point: python -m src.refresh (or python -m src)
+CLI entry point: python -m src
 
-Pulls all live data sources and updates SQLite. Designed to be run manually
-or triggered by a cron job (Phase 3 will wire this into GitHub Actions).
+Pulls all live data sources, updates SQLite, then exports CSVs to data/live/
+so GitHub Actions can commit a human-readable snapshot of the latest data.
+
+Exit codes:
+  0 — TSMC and market prices both succeeded (Korea is optional; needs ECOS key)
+  1 — TSMC or market prices failed (needs investigation)
 """
+import os
 import sys
+
+import pandas as pd
+
 import src.store as store
-from src.fetchers.tsmc import fetch_revenue
 from src.fetchers.korea import fetch_exports
 from src.fetchers.market import fetch_prices
+from src.fetchers.tsmc import fetch_revenue
+
+_LIVE_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "live")
+
+
+def _export_csv(df: pd.DataFrame, filename: str) -> None:
+    """Write df to data/live/{filename} so GitHub Actions can commit it."""
+    os.makedirs(_LIVE_DIR, exist_ok=True)
+    df.to_csv(os.path.join(_LIVE_DIR, filename), index=False)
 
 
 def refresh() -> None:
     store.init_db()
-    ok, fail = [], []
+    hard_fail = []   # TSMC + prices — exit 1 if either fails
+    soft_fail = []   # Korea — optional, needs ECOS key
 
     # --- TSMC ---
     print("Fetching TSMC monthly revenue...")
     tsmc_df = fetch_revenue()
     if tsmc_df is not None and not tsmc_df.empty:
         store.upsert_tsmc(tsmc_df)
-        print(f"  ✓ {len(tsmc_df)} TSMC rows upserted")
-        ok.append("TSMC")
+        _export_csv(tsmc_df, "tsmc_revenue.csv")
+        print(f"  ✓ {len(tsmc_df)} rows  →  data/live/tsmc_revenue.csv")
     else:
         print("  ✗ TSMC fetch failed — keeping existing data")
-        fail.append("TSMC")
+        hard_fail.append("TSMC")
 
     # --- Korea exports ---
     print("Fetching Korea semiconductor exports...")
     korea_df = fetch_exports()
     if korea_df is not None and not korea_df.empty:
         store.upsert_korea(korea_df)
-        print(f"  ✓ {len(korea_df)} Korea rows upserted")
-        ok.append("Korea")
+        _export_csv(korea_df, "korea_exports.csv")
+        print(f"  ✓ {len(korea_df)} rows  →  data/live/korea_exports.csv")
     else:
-        print("  ✗ Korea fetch failed — keeping existing data")
-        fail.append("Korea")
+        print("  ✗ Korea fetch failed (set ECOS_API_KEY in .env to enable)")
+        soft_fail.append("Korea")
 
     # --- Market prices ---
     print("Fetching market prices...")
     prices_df = fetch_prices()
     if prices_df is not None and not prices_df.empty:
         store.upsert_prices(prices_df)
-        print(f"  ✓ {len(prices_df)} price rows upserted")
-        ok.append("Prices")
+        _export_csv(prices_df, "prices.csv")
+        print(f"  ✓ {len(prices_df)} rows  →  data/live/prices.csv")
     else:
-        print("  ✗ Price fetch failed — keeping existing data")
-        fail.append("Prices")
+        print("  ✗ Price fetch failed")
+        hard_fail.append("Prices")
 
-    print(f"\nDone. OK: {ok or 'none'} | Failed: {fail or 'none'}")
-    if fail:
+    ok = [s for s in ["TSMC", "Korea", "Prices"]
+          if s not in hard_fail and s not in soft_fail]
+    print(f"\nDone.  OK: {ok or '—'}  |  Soft fail: {soft_fail or '—'}  |  Hard fail: {hard_fail or '—'}")
+
+    if hard_fail:
         sys.exit(1)
 
 

@@ -1,0 +1,45 @@
+name: Weekly data refresh
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC — well after Asia markets close Sunday,
+    # and before US markets open Monday.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:  # also triggerable manually from the Actions tab
+
+permissions:
+  contents: write   # needed to push the data/live/ commit back
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh data
+        env:
+          # Add ECOS_API_KEY in repo Settings → Secrets → Actions to enable
+          # Korea semiconductor export data. The job succeeds without it;
+          # Korea charts will stay on sample data until the key is added.
+          ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+        run: python -m src
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/live/
+          # Only commit if something actually changed
+          git diff --cached --quiet || git commit -m "data: weekly refresh $(date -u +%Y-%m-%d)"
+          git push

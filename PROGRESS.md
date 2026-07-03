@@ -81,3 +81,33 @@ yfinance's `reset_index()` column name varies by version. Fixed by taking `reset
 
 ### Known ECOS series code uncertainty
 The item code `19` for semiconductors within table `242Y001` is a best-effort guess — the ECOS sample API key does not have sufficient permissions to browse item lists. Needs verification with a real key.
+
+---
+
+## Phase 3 — Automation & Polish (2026-07-03)
+
+### What was built
+
+1. **`data/live/` CSV snapshots** — the refresh command now exports `tsmc_revenue.csv` and `prices.csv` (and `korea_exports.csv` once ECOS key is set) to `data/live/` after every successful fetch. These files are committed to git so a fresh clone always has real data without needing to run a refresh.
+
+2. **GitHub Actions cron** (`.github/workflows/refresh.yml`) — runs every Monday at 06:00 UTC. Fetches all sources, commits `data/live/*.csv` back to the repo. GitHub emails the repo owner automatically if the job fails. `ECOS_API_KEY` can be added as a repo secret to enable Korea data.
+
+3. **`data/live/` fallback in `app.py`** — `_seed_data()` checks `data/live/` before `data/samples/`. Fresh clones load real data from the Actions snapshot instead of approximations.
+
+4. **Stale-data banner for prices** (`_price_stale_banner`) — if the latest price close is more than 7 days old, the app shows a warning with the age and tells the user to run `python -m src`. TSMC and Korea don't get a stale flag (monthly data naturally lags 30+ days).
+
+5. **"Last updated" captions** on every chart — TSMC and Korea show the latest month (`May 2026`); prices show the latest close date.
+
+6. **Exit code cleanup in `src/__main__.py`** — Korea failure is now a "soft fail" (exits 0) since it's expected when ECOS_API_KEY isn't configured. TSMC or price failures exit 1 and alert via GitHub Actions.
+
+7. **README.md** — public-facing documentation covering the investing thesis, quick start, architecture, and Korea data setup.
+
+### What to review
+1. **`.github/workflows/refresh.yml`** — read it top to bottom; it's 30 lines and shows the full automation flow. The `permissions: contents: write` line is what lets it push the data commit.
+2. **`data/live/`** — these files are now in git. After the first Actions run on Monday, they'll contain real data. Until then they contain today's local refresh (TSMC + prices live; Korea samples).
+3. **README "Screenshots" section** — placeholder. Take screenshots after opening the app in a browser and paste them in.
+
+### Remaining for Phase 4
+- Hyperscaler capex table (manual quarterly CSV)
+- Memory spot price manual-entry form
+- Streamlit Community Cloud deploy

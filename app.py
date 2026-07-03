@@ -4,20 +4,25 @@ Run with: streamlit run app.py
 """
 import os
 import sys
+from datetime import date, timedelta
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-# Ensure src/ is importable when the script is run from the project root
 sys.path.insert(0, os.path.dirname(__file__))
 
 import src.store as store
 import src.transforms as transforms
 from src.fetchers.market import fetch_prices
 
+_LIVE_DIR = os.path.join(os.path.dirname(__file__), "data", "live")
 _SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "data", "samples")
 _NOTES_PATH = os.path.join(os.path.dirname(__file__), "notes.md")
+
+# Market prices are stale if the latest close is more than this many days old.
+# 7 days covers a week of missed refreshes without false-positives on weekends.
+_PRICE_STALE_DAYS = 7
 
 st.set_page_config(page_title="Semis Dashboard", layout="wide")
 
@@ -26,32 +31,69 @@ st.set_page_config(page_title="Semis Dashboard", layout="wide")
 # Data loading helpers
 # ---------------------------------------------------------------------------
 
-def _seed_sample(table: str, csv_name: str, upsert_fn) -> None:
-    """Load a sample CSV into the DB if the table is empty."""
-    if store.row_count(table) == 0:
-        df = pd.read_csv(os.path.join(_SAMPLE_DIR, csv_name))
-        upsert_fn(df)
+def _best_csv(csv_name: str) -> str:
+    """Return path to data/live/{name} if it exists, else data/samples/{name}.
+    GitHub Actions commits live/ after each weekly refresh; samples/ is the
+    fallback for a fresh clone before any refresh has run."""
+    live = os.path.join(_LIVE_DIR, csv_name)
+    return live if os.path.exists(live) else os.path.join(_SAMPLE_DIR, csv_name)
+
+
+def _seed_data(table: str, csv_name: str, upsert_fn) -> bool:
+    """Seed the DB from the best available CSV if the table is empty.
+    Returns True if seeded from live data, False if from samples."""
+    if store.row_count(table) > 0:
+        return None  # already populated
+    path = _best_csv(csv_name)
+    df = pd.read_csv(path)
+    upsert_fn(df)
+    return "live" in path
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_prices() -> pd.DataFrame:
-    """
-    Return prices from the DB, fetching from yfinance first if the table is empty.
-    TTL=3600 means Streamlit re-fetches at most once per hour.
-    """
+    """Return prices from the DB, fetching from yfinance first if empty.
+    TTL=3600 means at most one yfinance call per hour."""
     if store.row_count("prices") == 0:
-        with st.spinner("Fetching live market data from Yahoo Finance…"):
-            try:
-                fresh = fetch_prices()
-                store.upsert_prices(fresh)
-            except Exception as e:
-                st.error(f"Could not fetch market data: {e}")
-                return pd.DataFrame()
+        # Try the live CSV first (faster than yfinance on first load)
+        live_csv = os.path.join(_LIVE_DIR, "prices.csv")
+        if os.path.exists(live_csv):
+            df = pd.read_csv(live_csv)
+            store.upsert_prices(df)
+        else:
+            with st.spinner("Fetching live market data from Yahoo Finance…"):
+                try:
+                    fresh = fetch_prices()
+                    store.upsert_prices(fresh)
+                except Exception as e:
+                    st.error(f"Could not fetch market data: {e}")
+                    return pd.DataFrame()
     return store.get_prices()
 
 
 def _is_sample(df: pd.DataFrame) -> bool:
     return "source" in df.columns and (df["source"] == "sample").all()
+
+
+def _latest_date(df: pd.DataFrame, date_col: str = "date") -> date | None:
+    if df.empty:
+        return None
+    return pd.to_datetime(df[date_col].max()).date()
+
+
+def _price_stale_banner(prices: pd.DataFrame) -> None:
+    """Warn if the latest price close is older than _PRICE_STALE_DAYS."""
+    latest = _latest_date(prices)
+    if latest is None:
+        return
+    age = (date.today() - latest).days
+    # Subtract expected non-trading days (rough: 2 weekend days per 7)
+    if age > _PRICE_STALE_DAYS:
+        st.warning(
+            f"Price data is {age} days old (last close: {latest}). "
+            "Run `python -m src` to refresh.",
+            icon="⚠️",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +116,11 @@ def _yoy_bar(df: pd.DataFrame, value_col: str, title: str) -> go.Figure:
     return fig
 
 
-def _indexed_line(prices_df: pd.DataFrame, base_date: str, tickers: list[str] | None = None) -> go.Figure:
+def _indexed_line(
+    prices_df: pd.DataFrame,
+    base_date: str,
+    tickers: list[str] | None = None,
+) -> go.Figure:
     if tickers:
         prices_df = prices_df[prices_df["ticker"].isin(tickers)]
     indexed = transforms.index_prices(prices_df, base_date)
@@ -104,28 +150,40 @@ def _tab_overview(prices: pd.DataFrame) -> None:
     with col1:
         tsmc = store.get_tsmc()
         if _is_sample(tsmc):
-            st.warning("SAMPLE DATA — TSMC scraper not yet wired (Phase 2)", icon="⚠️")
+            st.warning("SAMPLE DATA — TSMC scraper not yet run. Run `python -m src`.", icon="⚠️")
         st.plotly_chart(
             _yoy_bar(tsmc, "revenue_ntd", "TSMC Monthly Revenue — YoY %"),
             use_container_width=True,
         )
-        st.caption("Source: TSMC Investor Relations (pr.tsmc.com) | NT$ millions")
+        latest_tsmc = _latest_date(tsmc)
+        st.caption(
+            f"Source: TSMC Investor Relations (investor.tsmc.com) | NT$ millions"
+            + (f" | Last data: {latest_tsmc.strftime('%b %Y')}" if latest_tsmc else "")
+        )
 
     with col2:
         korea = store.get_korea()
         if _is_sample(korea):
-            st.warning("SAMPLE DATA — Korea exports fetcher not yet wired (Phase 2)", icon="⚠️")
+            st.warning(
+                "SAMPLE DATA — add ECOS_API_KEY to .env and run `python -m src`.", icon="⚠️"
+            )
         st.plotly_chart(
             _yoy_bar(korea, "exports_usd", "Korea Semiconductor Exports — YoY %"),
             use_container_width=True,
         )
-        st.caption("Source: Korea Customs Service | USD billions")
+        latest_korea = _latest_date(korea)
+        st.caption(
+            f"Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
+            + (f" | Last data: {latest_korea.strftime('%b %Y')}" if latest_korea else "")
+        )
 
     st.subheader("Indexed Ticker Performance")
 
     if prices.empty:
         st.error("No price data available — check your internet connection.")
         return
+
+    _price_stale_banner(prices)
 
     min_date = pd.to_datetime(prices["date"].min()).date()
     max_date = pd.to_datetime(prices["date"].max()).date()
@@ -141,12 +199,11 @@ def _tab_overview(prices: pd.DataFrame) -> None:
     prices_from_base = prices[prices["date"] >= str(base_date)]
 
     try:
-        fig = _indexed_line(prices_from_base, str(base_date))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(_indexed_line(prices_from_base, str(base_date)), use_container_width=True)
     except ValueError as e:
         st.error(str(e))
 
-    st.caption(f"Source: Yahoo Finance via yfinance | Last updated: {max_date}")
+    st.caption(f"Source: Yahoo Finance via yfinance | Last close: {max_date}")
 
 
 def _tab_memory(prices: pd.DataFrame) -> None:
@@ -154,9 +211,10 @@ def _tab_memory(prices: pd.DataFrame) -> None:
 
     korea = store.get_korea()
     if _is_sample(korea):
-        st.warning("SAMPLE DATA — Korea exports fetcher not yet wired (Phase 2)", icon="⚠️")
+        st.warning(
+            "SAMPLE DATA — add ECOS_API_KEY to .env and run `python -m src`.", icon="⚠️"
+        )
 
-    # Level + 3MMA
     korea = korea.copy()
     korea["date"] = pd.to_datetime(korea["date"])
     korea = korea.sort_values("date")
@@ -175,22 +233,29 @@ def _tab_memory(prices: pd.DataFrame) -> None:
     )
     st.plotly_chart(fig_level, use_container_width=True)
 
-    # YoY
     st.plotly_chart(
-        _yoy_bar(korea.assign(date=korea["date"].dt.strftime("%Y-%m-%d")), "exports_usd",
-                 "Korea Semiconductor Exports — YoY %"),
+        _yoy_bar(
+            korea.assign(date=korea["date"].dt.strftime("%Y-%m-%d")),
+            "exports_usd",
+            "Korea Semiconductor Exports — YoY %",
+        ),
         use_container_width=True,
     )
 
-    st.caption("Source: Korea Customs Service (sample) | USD billions")
+    latest_korea = _latest_date(korea, "date")
+    st.caption(
+        "Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
+        + (f" | Last data: {latest_korea.strftime('%b %Y')}" if latest_korea else "")
+    )
 
-    # Memory chip stocks
     st.subheader("Memory Chip Stocks")
     MEMORY_TICKERS = ["MU", "000660.KS", "005930.KS"]
 
     if prices.empty:
         st.error("No price data available.")
         return
+
+    _price_stale_banner(prices)
 
     mem_prices = prices[prices["ticker"].isin(MEMORY_TICKERS)]
     if mem_prices.empty:
@@ -211,12 +276,14 @@ def _tab_memory(prices: pd.DataFrame) -> None:
     mem_from_base = mem_prices[mem_prices["date"] >= str(base_date)]
 
     try:
-        fig = _indexed_line(mem_from_base, str(base_date), MEMORY_TICKERS)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            _indexed_line(mem_from_base, str(base_date), MEMORY_TICKERS),
+            use_container_width=True,
+        )
     except ValueError as e:
         st.error(str(e))
 
-    st.caption(f"Source: Yahoo Finance via yfinance | Last updated: {max_date}")
+    st.caption(f"Source: Yahoo Finance via yfinance | Last close: {max_date}")
 
 
 def _tab_notes() -> None:
@@ -234,8 +301,8 @@ def _tab_notes() -> None:
 
 def main() -> None:
     store.init_db()
-    _seed_sample("tsmc_revenue", "tsmc_revenue.csv", store.upsert_tsmc)
-    _seed_sample("korea_exports", "korea_exports.csv", store.upsert_korea)
+    _seed_data("tsmc_revenue", "tsmc_revenue.csv", store.upsert_tsmc)
+    _seed_data("korea_exports", "korea_exports.csv", store.upsert_korea)
 
     prices = _load_prices()
 
