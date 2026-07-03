@@ -129,7 +129,7 @@ def _tab_overview(prices: pd.DataFrame) -> None:
         if _is_sample(tsmc):
             st.warning("SAMPLE DATA — run `python -m src` to load live data.", icon="⚠️")
         st.plotly_chart(_yoy_bar(tsmc, "revenue_ntd", "TSMC Monthly Revenue — YoY %"),
-                        use_container_width=True)
+                        use_container_width=True, key="ov_tsmc_yoy")
         latest = _latest_date(tsmc)
         st.caption(
             "Source: TSMC Investor Relations (investor.tsmc.com) | NT$ millions"
@@ -141,7 +141,7 @@ def _tab_overview(prices: pd.DataFrame) -> None:
         if _is_sample(korea):
             st.warning("SAMPLE DATA — add ECOS_API_KEY and run `python -m src`.", icon="⚠️")
         st.plotly_chart(_yoy_bar(korea, "exports_usd", "Korea Semiconductor Exports — YoY %"),
-                        use_container_width=True)
+                        use_container_width=True, key="ov_korea_yoy")
         latest = _latest_date(korea)
         st.caption(
             "Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
@@ -167,7 +167,7 @@ def _tab_overview(prices: pd.DataFrame) -> None:
     try:
         st.plotly_chart(
             _indexed_line(prices[prices["date"] >= str(base_date)], str(base_date)),
-            use_container_width=True,
+            use_container_width=True, key="ov_indexed",
         )
     except ValueError as e:
         st.error(str(e))
@@ -196,12 +196,12 @@ def _tab_memory(prices: pd.DataFrame) -> None:
         xaxis_title="Month", yaxis_title="USD billions",
         legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
     )
-    st.plotly_chart(fig_level, use_container_width=True)
+    st.plotly_chart(fig_level, use_container_width=True, key="mem_korea_level")
 
     st.plotly_chart(
         _yoy_bar(korea.assign(date=korea["date"].dt.strftime("%Y-%m-%d")),
                  "exports_usd", "Korea Semiconductor Exports — YoY %"),
-        use_container_width=True,
+        use_container_width=True, key="mem_korea_yoy",
     )
 
     latest = _latest_date(korea, "date")
@@ -226,7 +226,7 @@ def _tab_memory(prices: pd.DataFrame) -> None:
             try:
                 st.plotly_chart(
                     _indexed_line(mem[mem["date"] >= str(base)], str(base), MEMORY_TICKERS),
-                    use_container_width=True,
+                    use_container_width=True, key="mem_stocks",
                 )
             except ValueError as e:
                 st.error(str(e))
@@ -254,7 +254,7 @@ def _tab_memory(prices: pd.DataFrame) -> None:
             legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
             hovermode="x unified",
         )
-        st.plotly_chart(fig_spot, use_container_width=True)
+        st.plotly_chart(fig_spot, use_container_width=True, key="mem_spot")
         st.caption("Source: manual entry | DRAM = DDR5-4800 16GB module | NAND = 128Gb TLC spot")
 
     with st.expander("Add memory spot price entry"):
@@ -302,7 +302,7 @@ def _tab_capex() -> None:
         legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
         hovermode="x unified",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="cap_stacked")
 
     # --- Total per quarter line ---
     totals = df.groupby("quarter")["capex_bn_usd"].sum().reset_index()
@@ -315,7 +315,7 @@ def _tab_capex() -> None:
         xaxis_title="Quarter", yaxis_title="USD billions",
         margin=dict(l=0, r=0, t=40, b=0),
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, use_container_width=True, key="cap_total")
 
     st.caption(
         "Sources: Amazon/Microsoft/Google/Meta quarterly earnings releases | "
