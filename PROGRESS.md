@@ -136,7 +136,7 @@ Price series to track: DRAMeXchange weekly spot prices are a common source. Any 
 
 - `.streamlit/config.toml`: dark theme, usage stats off
 - README updated with Streamlit badge and deploy instructions
-- Deploy URL: https://oli-verr-semis-dashboard.streamlit.app (once created at share.streamlit.io)
+- Deploy URL: https://semis-dashboard-lkz9q9jt5gzq5szgkjqi6v.streamlit.app
 
 The deploy flow relies on `data/live/*.csv` being committed — which they are after Phase 3. A fresh Streamlit Cloud instance loads data from those files without needing `python -m src` to run first.
 

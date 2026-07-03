@@ -1,6 +1,6 @@
 # AI / Semiconductor Trade Dashboard
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://oli-verr-semis-dashboard.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://semis-dashboard-lkz9q9jt5gzq5szgkjqi6v.streamlit.app)
 
 A personal dashboard for tracking the AI/semiconductor investment thesis through high-frequency public data. Built as both a real investing tool and a portfolio artifact.
 
