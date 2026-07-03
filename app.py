@@ -374,23 +374,55 @@ def _tab_gpu() -> None:
         )
         st.plotly_chart(fig_bar, use_container_width=True, key="gpu_snapshot")
 
-        # Price history (meaningful once we have multiple fetch dates)
+        # Bloomberg-style price history — always shown; accumulates week by week via cron
+        st.subheader("GPU Spot Price History")
         dates = sorted(gpu_df["fetch_date"].unique())
-        if len(dates) > 1:
-            st.subheader("H100 SXM Spot Price — History")
-            h100 = gpu_df[gpu_df["gpu_id"] == "NVIDIA H100 80GB HBM3"].sort_values("fetch_date")
-            if not h100.empty:
-                fig_hist = go.Figure()
+
+        gpus_with_spot = (
+            gpu_df.dropna(subset=["spot_price"])
+            .groupby("gpu_id")["gpu_name"]
+            .first()
+            .reset_index()
+        )
+        _HIST_DEFAULTS = [
+            "NVIDIA H100 80GB HBM3", "NVIDIA H200",
+            "NVIDIA A100-SXM4-80GB", "NVIDIA GeForce RTX 4090",
+        ]
+        default_sel = [g for g in _HIST_DEFAULTS if g in gpus_with_spot["gpu_id"].values]
+        name_map = gpus_with_spot.set_index("gpu_id")["gpu_name"].to_dict()
+
+        selected_ids = st.multiselect(
+            "GPUs to chart",
+            options=gpus_with_spot["gpu_id"].tolist(),
+            format_func=lambda gid: name_map.get(gid, gid),
+            default=default_sel or gpus_with_spot["gpu_id"].tolist()[:3],
+            key="gpu_hist_select",
+        )
+
+        fig_hist = go.Figure()
+        for gpu_id in selected_ids:
+            rows = (
+                gpu_df[gpu_df["gpu_id"] == gpu_id]
+                .sort_values("fetch_date")
+                .dropna(subset=["spot_price"])
+            )
+            if not rows.empty:
                 fig_hist.add_scatter(
-                    x=h100["fetch_date"], y=h100["spot_price"],
-                    mode="lines+markers", name="H100 SXM spot ($/hr)",
-                    line=dict(width=2),
+                    x=rows["fetch_date"], y=rows["spot_price"],
+                    mode="lines+markers" if len(rows) > 1 else "markers",
+                    name=rows["gpu_name"].iloc[0], line=dict(width=2),
                 )
-                fig_hist.update_layout(
-                    xaxis_title="Date", yaxis_title="USD / hr",
-                    margin=dict(l=0, r=0, t=0, b=0),
-                )
-                st.plotly_chart(fig_hist, use_container_width=True, key="gpu_h100_hist")
+        fig_hist.update_layout(
+            xaxis_title="Date", yaxis_title="USD / hr",
+            hovermode="x unified", legend=dict(orientation="h"),
+            margin=dict(l=0, r=0, t=0, b=0),
+        )
+        st.plotly_chart(fig_hist, use_container_width=True, key="gpu_h100_hist")
+        if len(dates) == 1:
+            st.caption(
+                f"One data point so far ({dates[0]}) — "
+                "trend lines fill in week by week via the refresh cron."
+            )
 
         st.caption(
             f"Source: RunPod public GraphQL API (api.runpod.io/graphql) | "

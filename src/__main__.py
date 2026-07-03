@@ -28,6 +28,27 @@ def _export_csv(df: pd.DataFrame, filename: str) -> None:
     df.to_csv(os.path.join(_LIVE_DIR, filename), index=False)
 
 
+def _export_gpu_csv(new_df: pd.DataFrame) -> None:
+    """Append today's GPU rows to the accumulated history CSV.
+    Unlike other sources (which are point-in-time snapshots), GPU spot prices
+    are a time series we build ourselves — each weekly run appends a new row
+    so the trend chart fills in over time."""
+    path = os.path.join(_LIVE_DIR, "gpu_spot_prices.csv")
+    os.makedirs(_LIVE_DIR, exist_ok=True)
+    if os.path.exists(path):
+        existing = pd.read_csv(path)
+        combined = (
+            pd.concat([existing, new_df])
+            .drop_duplicates(subset=["fetch_date", "gpu_id"], keep="last")
+            .sort_values(["fetch_date", "gpu_name"])
+            .reset_index(drop=True)
+        )
+    else:
+        combined = new_df
+    combined.to_csv(path, index=False)
+    print(f"  ✓ {len(combined)} total rows  →  data/live/gpu_spot_prices.csv")
+
+
 def refresh() -> None:
     store.init_db()
     hard_fail = []   # TSMC + prices — exit 1 if either fails
@@ -71,8 +92,7 @@ def refresh() -> None:
     gpu_df = fetch_gpu_prices()
     if gpu_df is not None and not gpu_df.empty:
         store.upsert_gpu_prices(gpu_df)
-        _export_csv(gpu_df, "gpu_spot_prices.csv")
-        print(f"  ✓ {len(gpu_df)} rows  →  data/live/gpu_spot_prices.csv")
+        _export_gpu_csv(gpu_df)   # append-only — builds history week by week
     else:
         print("  ✗ GPU price fetch failed")
         soft_fail.append("GPU")
