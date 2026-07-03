@@ -32,6 +32,12 @@ def init_db() -> None:
                 close  REAL,
                 PRIMARY KEY (date, ticker)
             );
+            CREATE TABLE IF NOT EXISTS memory_prices (
+                date         TEXT PRIMARY KEY,
+                dram_ddr5    REAL,   -- DDR5-4800 16GB module spot, USD
+                nand_tlc     REAL,   -- 128Gb TLC NAND, USD cents/GB
+                notes        TEXT
+            );
         """)
 
 
@@ -73,6 +79,19 @@ def get_korea() -> pd.DataFrame:
 def get_prices() -> pd.DataFrame:
     with _conn() as conn:
         return pd.read_sql("SELECT * FROM prices ORDER BY date", conn)
+
+
+def upsert_memory_price(date: str, dram: float | None, nand: float | None, notes: str = "") -> None:
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_prices (date, dram_ddr5, nand_tlc, notes) VALUES (?, ?, ?, ?)",
+            (date, dram, nand, notes),
+        )
+
+
+def get_memory_prices() -> pd.DataFrame:
+    with _conn() as conn:
+        return pd.read_sql("SELECT * FROM memory_prices ORDER BY date", conn)
 
 
 def row_count(table: str) -> int:

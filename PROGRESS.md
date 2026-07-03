@@ -111,3 +111,37 @@ The item code `19` for semiconductors within table `242Y001` is a best-effort gu
 - Hyperscaler capex table (manual quarterly CSV)
 - Memory spot price manual-entry form
 - Streamlit Community Cloud deploy
+
+---
+
+## Phase 4 — Stretch Features (2026-07-03)
+
+### What was built
+
+**1. Hyperscaler Capex tab** (`data/capex.csv` + `_tab_capex()` in `app.py`)
+
+A new "Capex" tab with two charts: a stacked bar showing each company's quarterly spend and a combined total line. The raw data table is under an expander. To update: add rows to `data/capex.csv` after each earnings season — the app reads it directly, no DB involved.
+
+Companies: Amazon, Microsoft, Google, Meta. Data goes back to 2022-Q1 so the acceleration into AI capex is visible. Values are approximate from public earnings releases; treat as a directional guide, not exact accounting.
+
+**2. Memory spot price form** (`store.memory_prices` + form in `_tab_memory()`)
+
+Added a `memory_prices` table to SQLite and a Streamlit form at the bottom of the Memory tab. Enter DRAM (DDR5-4800 16GB module, USD) and NAND (128Gb TLC, ¢/GB) spot prices with an optional note. Once entries exist, a dual-axis line chart appears above the form. The form uses `st.rerun()` to refresh the chart immediately after saving.
+
+Price series to track: DRAMeXchange weekly spot prices are a common source. Any web search for "DDR5 spot price" will surface current quotes.
+
+**Persistence note:** on Streamlit Community Cloud, the SQLite DB is ephemeral (resets on restart). Manual spot prices entered through the form only persist in the local `data/semis.db`. For Cloud use, this is a limitation — a future improvement would export these to a committed CSV.
+
+**3. Streamlit Community Cloud deploy**
+
+- `.streamlit/config.toml`: dark theme, usage stats off
+- README updated with Streamlit badge and deploy instructions
+- Deploy URL: https://oli-verr-semis-dashboard.streamlit.app (once created at share.streamlit.io)
+
+The deploy flow relies on `data/live/*.csv` being committed — which they are after Phase 3. A fresh Streamlit Cloud instance loads data from those files without needing `python -m src` to run first.
+
+### To deploy now
+1. Go to [share.streamlit.io](https://share.streamlit.io)
+2. New app → `oli-verr/semis-dashboard` → `main` → `app.py`
+3. (Optional) add `ECOS_API_KEY` under Advanced secrets
+4. Deploy

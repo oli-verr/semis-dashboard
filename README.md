@@ -1,5 +1,7 @@
 # AI / Semiconductor Trade Dashboard
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://oli-verr-semis-dashboard.streamlit.app)
+
 A personal dashboard for tracking the AI/semiconductor investment thesis through high-frequency public data. Built as both a real investing tool and a portfolio artifact.
 
 The core insight: leading-edge semiconductor demand is highly concentrated — TSMC alone makes ~90% of the world's most advanced chips. Three data series tell most of the story: TSMC's monthly revenue (demand for AI/HPC compute), Korea's semiconductor exports (memory pricing and volume), and relative price performance of the major players.
@@ -117,6 +119,24 @@ Edit `notes.md` at the repo root. Markdown renders in the Notes tab. This feeds 
 
 ---
 
-## Roadmap
+## Streamlit Community Cloud deploy
 
-- **Phase 4 (stretch):** Hyperscaler capex table, memory spot price form, Streamlit Community Cloud deploy
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub
+2. Click **New app** → select `oli-verr/semis-dashboard` → branch `main` → main file `app.py`
+3. Under **Advanced settings**, add `ECOS_API_KEY` as a secret if you have one
+4. Deploy — the app will load data from `data/live/` (committed to the repo) on first start
+
+Data stays fresh via the weekly GitHub Actions cron, which commits updated `data/live/*.csv`. Streamlit Cloud auto-redeploys on each push.
+
+Note: manual memory spot price entries (from the in-app form) don't persist across Streamlit Cloud restarts since `data/semis.db` is ephemeral there. Use the local setup for that workflow.
+
+## Capex table
+
+`data/capex.csv` holds quarterly capex for Amazon, Microsoft, Google, and Meta. Update it each quarter after earnings by adding new rows — the Capex tab re-reads the file on every page load.
+
+```
+quarter,company,capex_bn_usd
+2025-Q2,Amazon,XX.X
+2025-Q2,Microsoft,XX.X
+...
+```

@@ -4,7 +4,7 @@ Run with: streamlit run app.py
 """
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,10 +18,9 @@ from src.fetchers.market import fetch_prices
 
 _LIVE_DIR = os.path.join(os.path.dirname(__file__), "data", "live")
 _SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "data", "samples")
+_CAPEX_CSV = os.path.join(os.path.dirname(__file__), "data", "capex.csv")
 _NOTES_PATH = os.path.join(os.path.dirname(__file__), "notes.md")
 
-# Market prices are stale if the latest close is more than this many days old.
-# 7 days covers a week of missed refreshes without false-positives on weekends.
 _PRICE_STALE_DAYS = 7
 
 st.set_page_config(page_title="Semis Dashboard", layout="wide")
@@ -32,39 +31,29 @@ st.set_page_config(page_title="Semis Dashboard", layout="wide")
 # ---------------------------------------------------------------------------
 
 def _best_csv(csv_name: str) -> str:
-    """Return path to data/live/{name} if it exists, else data/samples/{name}.
-    GitHub Actions commits live/ after each weekly refresh; samples/ is the
-    fallback for a fresh clone before any refresh has run."""
+    """Prefer data/live/ (committed by GitHub Actions) over data/samples/."""
     live = os.path.join(_LIVE_DIR, csv_name)
     return live if os.path.exists(live) else os.path.join(_SAMPLE_DIR, csv_name)
 
 
-def _seed_data(table: str, csv_name: str, upsert_fn) -> bool:
-    """Seed the DB from the best available CSV if the table is empty.
-    Returns True if seeded from live data, False if from samples."""
+def _seed_data(table: str, csv_name: str, upsert_fn) -> None:
     if store.row_count(table) > 0:
-        return None  # already populated
-    path = _best_csv(csv_name)
-    df = pd.read_csv(path)
+        return
+    df = pd.read_csv(_best_csv(csv_name))
     upsert_fn(df)
-    return "live" in path
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_prices() -> pd.DataFrame:
-    """Return prices from the DB, fetching from yfinance first if empty.
-    TTL=3600 means at most one yfinance call per hour."""
+    """Return prices from DB; load from live CSV or yfinance if DB is empty."""
     if store.row_count("prices") == 0:
-        # Try the live CSV first (faster than yfinance on first load)
         live_csv = os.path.join(_LIVE_DIR, "prices.csv")
         if os.path.exists(live_csv):
-            df = pd.read_csv(live_csv)
-            store.upsert_prices(df)
+            store.upsert_prices(pd.read_csv(live_csv))
         else:
             with st.spinner("Fetching live market data from Yahoo Finance…"):
                 try:
-                    fresh = fetch_prices()
-                    store.upsert_prices(fresh)
+                    store.upsert_prices(fetch_prices())
                 except Exception as e:
                     st.error(f"Could not fetch market data: {e}")
                     return pd.DataFrame()
@@ -82,15 +71,10 @@ def _latest_date(df: pd.DataFrame, date_col: str = "date") -> date | None:
 
 
 def _price_stale_banner(prices: pd.DataFrame) -> None:
-    """Warn if the latest price close is older than _PRICE_STALE_DAYS."""
     latest = _latest_date(prices)
-    if latest is None:
-        return
-    age = (date.today() - latest).days
-    # Subtract expected non-trading days (rough: 2 weekend days per 7)
-    if age > _PRICE_STALE_DAYS:
+    if latest and (date.today() - latest).days > _PRICE_STALE_DAYS:
         st.warning(
-            f"Price data is {age} days old (last close: {latest}). "
+            f"Price data is {(date.today() - latest).days} days old (last close: {latest}). "
             "Run `python -m src` to refresh.",
             icon="⚠️",
         )
@@ -107,19 +91,14 @@ def _yoy_bar(df: pd.DataFrame, value_col: str, title: str) -> go.Figure:
     fig.add_bar(x=df["date"], y=df["yoy_pct"], name="YoY %")
     fig.update_layout(
         title=title,
-        xaxis_title="Month",
-        yaxis_title="YoY %",
-        yaxis_ticksuffix="%",
-        margin=dict(l=0, r=0, t=40, b=0),
-        legend=dict(orientation="h"),
+        xaxis_title="Month", yaxis_title="YoY %", yaxis_ticksuffix="%",
+        margin=dict(l=0, r=0, t=40, b=0), legend=dict(orientation="h"),
     )
     return fig
 
 
 def _indexed_line(
-    prices_df: pd.DataFrame,
-    base_date: str,
-    tickers: list[str] | None = None,
+    prices_df: pd.DataFrame, base_date: str, tickers: list[str] | None = None,
 ) -> go.Figure:
     if tickers:
         prices_df = prices_df[prices_df["ticker"].isin(tickers)]
@@ -129,10 +108,8 @@ def _indexed_line(
         fig.add_scatter(x=indexed.index, y=indexed[ticker], name=ticker, mode="lines")
     fig.add_hline(y=100, line_dash="dot", line_color="gray", opacity=0.5)
     fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Indexed (100 = start date)",
-        hovermode="x unified",
-        legend=dict(orientation="h"),
+        xaxis_title="Date", yaxis_title="Indexed (100 = start date)",
+        hovermode="x unified", legend=dict(orientation="h"),
         margin=dict(l=0, r=0, t=0, b=0),
     )
     return fig
@@ -150,31 +127,25 @@ def _tab_overview(prices: pd.DataFrame) -> None:
     with col1:
         tsmc = store.get_tsmc()
         if _is_sample(tsmc):
-            st.warning("SAMPLE DATA — TSMC scraper not yet run. Run `python -m src`.", icon="⚠️")
-        st.plotly_chart(
-            _yoy_bar(tsmc, "revenue_ntd", "TSMC Monthly Revenue — YoY %"),
-            use_container_width=True,
-        )
-        latest_tsmc = _latest_date(tsmc)
+            st.warning("SAMPLE DATA — run `python -m src` to load live data.", icon="⚠️")
+        st.plotly_chart(_yoy_bar(tsmc, "revenue_ntd", "TSMC Monthly Revenue — YoY %"),
+                        use_container_width=True)
+        latest = _latest_date(tsmc)
         st.caption(
-            f"Source: TSMC Investor Relations (investor.tsmc.com) | NT$ millions"
-            + (f" | Last data: {latest_tsmc.strftime('%b %Y')}" if latest_tsmc else "")
+            "Source: TSMC Investor Relations (investor.tsmc.com) | NT$ millions"
+            + (f" | Last data: {latest.strftime('%b %Y')}" if latest else "")
         )
 
     with col2:
         korea = store.get_korea()
         if _is_sample(korea):
-            st.warning(
-                "SAMPLE DATA — add ECOS_API_KEY to .env and run `python -m src`.", icon="⚠️"
-            )
-        st.plotly_chart(
-            _yoy_bar(korea, "exports_usd", "Korea Semiconductor Exports — YoY %"),
-            use_container_width=True,
-        )
-        latest_korea = _latest_date(korea)
+            st.warning("SAMPLE DATA — add ECOS_API_KEY and run `python -m src`.", icon="⚠️")
+        st.plotly_chart(_yoy_bar(korea, "exports_usd", "Korea Semiconductor Exports — YoY %"),
+                        use_container_width=True)
+        latest = _latest_date(korea)
         st.caption(
-            f"Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
-            + (f" | Last data: {latest_korea.strftime('%b %Y')}" if latest_korea else "")
+            "Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
+            + (f" | Last data: {latest.strftime('%b %Y')}" if latest else "")
         )
 
     st.subheader("Indexed Ticker Performance")
@@ -190,16 +161,14 @@ def _tab_overview(prices: pd.DataFrame) -> None:
     default_start = max(min_date, (pd.Timestamp.today() - pd.DateOffset(years=1)).date())
 
     base_date = st.date_input(
-        "Index to 100 on:",
-        value=default_start,
-        min_value=min_date,
-        max_value=max_date,
-        key="overview_base",
+        "Index to 100 on:", value=default_start,
+        min_value=min_date, max_value=max_date, key="overview_base",
     )
-    prices_from_base = prices[prices["date"] >= str(base_date)]
-
     try:
-        st.plotly_chart(_indexed_line(prices_from_base, str(base_date)), use_container_width=True)
+        st.plotly_chart(
+            _indexed_line(prices[prices["date"] >= str(base_date)], str(base_date)),
+            use_container_width=True,
+        )
     except ValueError as e:
         st.error(str(e))
 
@@ -211,9 +180,7 @@ def _tab_memory(prices: pd.DataFrame) -> None:
 
     korea = store.get_korea()
     if _is_sample(korea):
-        st.warning(
-            "SAMPLE DATA — add ECOS_API_KEY to .env and run `python -m src`.", icon="⚠️"
-        )
+        st.warning("SAMPLE DATA — add ECOS_API_KEY and run `python -m src`.", icon="⚠️")
 
     korea = korea.copy()
     korea["date"] = pd.to_datetime(korea["date"])
@@ -222,10 +189,8 @@ def _tab_memory(prices: pd.DataFrame) -> None:
 
     fig_level = go.Figure()
     fig_level.add_bar(x=korea["date"], y=korea["exports_usd"], name="Exports", opacity=0.55)
-    fig_level.add_scatter(
-        x=korea["date"], y=korea["exports_usd_3mma"],
-        name="3-month MA", mode="lines", line=dict(width=3),
-    )
+    fig_level.add_scatter(x=korea["date"], y=korea["exports_usd_3mma"],
+                          name="3-month MA", mode="lines", line=dict(width=3))
     fig_level.update_layout(
         title="Korea Semiconductor Exports — Level (USD bn)",
         xaxis_title="Month", yaxis_title="USD billions",
@@ -234,56 +199,134 @@ def _tab_memory(prices: pd.DataFrame) -> None:
     st.plotly_chart(fig_level, use_container_width=True)
 
     st.plotly_chart(
-        _yoy_bar(
-            korea.assign(date=korea["date"].dt.strftime("%Y-%m-%d")),
-            "exports_usd",
-            "Korea Semiconductor Exports — YoY %",
-        ),
+        _yoy_bar(korea.assign(date=korea["date"].dt.strftime("%Y-%m-%d")),
+                 "exports_usd", "Korea Semiconductor Exports — YoY %"),
         use_container_width=True,
     )
 
-    latest_korea = _latest_date(korea, "date")
+    latest = _latest_date(korea, "date")
     st.caption(
         "Source: Bank of Korea ECOS / Korea Customs Service | USD billions"
-        + (f" | Last data: {latest_korea.strftime('%b %Y')}" if latest_korea else "")
+        + (f" | Last data: {latest.strftime('%b %Y')}" if latest else "")
     )
 
+    # --- Memory chip stocks ---
     st.subheader("Memory Chip Stocks")
     MEMORY_TICKERS = ["MU", "000660.KS", "005930.KS"]
 
-    if prices.empty:
-        st.error("No price data available.")
-        return
+    if not prices.empty:
+        _price_stale_banner(prices)
+        mem = prices[prices["ticker"].isin(MEMORY_TICKERS)]
+        if not mem.empty:
+            min_d = pd.to_datetime(mem["date"].min()).date()
+            max_d = pd.to_datetime(mem["date"].max()).date()
+            default = max(min_d, (pd.Timestamp.today() - pd.DateOffset(years=1)).date())
+            base = st.date_input("Index to 100 on:", value=default,
+                                 min_value=min_d, max_value=max_d, key="memory_base")
+            try:
+                st.plotly_chart(
+                    _indexed_line(mem[mem["date"] >= str(base)], str(base), MEMORY_TICKERS),
+                    use_container_width=True,
+                )
+            except ValueError as e:
+                st.error(str(e))
+            st.caption(f"Source: Yahoo Finance via yfinance | Last close: {max_d}")
 
-    _price_stale_banner(prices)
+    # --- Memory spot price form ---
+    st.subheader("Memory Spot Prices")
+    mem_prices = store.get_memory_prices()
 
-    mem_prices = prices[prices["ticker"].isin(MEMORY_TICKERS)]
-    if mem_prices.empty:
-        st.warning("No memory ticker data found.")
-        return
-
-    min_date = pd.to_datetime(mem_prices["date"].min()).date()
-    max_date = pd.to_datetime(mem_prices["date"].max()).date()
-    default_start = max(min_date, (pd.Timestamp.today() - pd.DateOffset(years=1)).date())
-
-    base_date = st.date_input(
-        "Index to 100 on:",
-        value=default_start,
-        min_value=min_date,
-        max_value=max_date,
-        key="memory_base",
-    )
-    mem_from_base = mem_prices[mem_prices["date"] >= str(base_date)]
-
-    try:
-        st.plotly_chart(
-            _indexed_line(mem_from_base, str(base_date), MEMORY_TICKERS),
-            use_container_width=True,
+    if not mem_prices.empty:
+        fig_spot = go.Figure()
+        mem_prices["date"] = pd.to_datetime(mem_prices["date"])
+        if mem_prices["dram_ddr5"].notna().any():
+            fig_spot.add_scatter(x=mem_prices["date"], y=mem_prices["dram_ddr5"],
+                                 name="DRAM DDR5-4800 16GB (USD)", mode="lines+markers")
+        if mem_prices["nand_tlc"].notna().any():
+            fig_spot.add_scatter(x=mem_prices["date"], y=mem_prices["nand_tlc"],
+                                 name="NAND TLC 128Gb (¢/GB)", mode="lines+markers",
+                                 yaxis="y2")
+        fig_spot.update_layout(
+            title="Memory Spot Prices (manual entry)",
+            xaxis_title="Date",
+            yaxis=dict(title="DRAM (USD)"),
+            yaxis2=dict(title="NAND (¢/GB)", overlaying="y", side="right"),
+            legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
+            hovermode="x unified",
         )
-    except ValueError as e:
-        st.error(str(e))
+        st.plotly_chart(fig_spot, use_container_width=True)
+        st.caption("Source: manual entry | DRAM = DDR5-4800 16GB module | NAND = 128Gb TLC spot")
 
-    st.caption(f"Source: Yahoo Finance via yfinance | Last close: {max_date}")
+    with st.expander("Add memory spot price entry"):
+        with st.form("mem_price_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                entry_date = st.date_input("Date", value=date.today())
+            with col2:
+                dram = st.number_input("DRAM DDR5-4800 16GB (USD)", min_value=0.0,
+                                       step=0.5, value=None, placeholder="e.g. 85.0")
+            with col3:
+                nand = st.number_input("NAND TLC 128Gb (¢/GB)", min_value=0.0,
+                                       step=0.1, value=None, placeholder="e.g. 3.5")
+            notes = st.text_input("Notes", placeholder="e.g. from DRAMeXchange wk27")
+            if st.form_submit_button("Save"):
+                store.upsert_memory_price(str(entry_date), dram, nand, notes)
+                st.success(f"Saved entry for {entry_date}.")
+                st.rerun()
+
+
+def _tab_capex() -> None:
+    st.header("Hyperscaler Capex")
+
+    if not os.path.exists(_CAPEX_CSV):
+        st.error(f"Missing {_CAPEX_CSV} — add it manually (see PROGRESS.md).")
+        return
+
+    # Skip comment lines in the CSV
+    df = pd.read_csv(_CAPEX_CSV, comment="#")
+    df["quarter"] = df["quarter"].str.strip()
+
+    companies = ["Amazon", "Microsoft", "Google", "Meta"]
+    colors = {"Amazon": "#FF9900", "Microsoft": "#00A4EF", "Google": "#4285F4", "Meta": "#0866FF"}
+
+    # --- Stacked bar chart ---
+    fig = go.Figure()
+    for company in companies:
+        sub = df[df["company"] == company].sort_values("quarter")
+        fig.add_bar(x=sub["quarter"], y=sub["capex_bn_usd"],
+                    name=company, marker_color=colors.get(company))
+    fig.update_layout(
+        barmode="stack",
+        title="Hyperscaler Quarterly Capex (USD bn)",
+        xaxis_title="Quarter", yaxis_title="USD billions",
+        legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Total per quarter line ---
+    totals = df.groupby("quarter")["capex_bn_usd"].sum().reset_index()
+    totals = totals.sort_values("quarter")
+    fig2 = go.Figure()
+    fig2.add_scatter(x=totals["quarter"], y=totals["capex_bn_usd"],
+                     mode="lines+markers", name="Combined Total", line=dict(width=3))
+    fig2.update_layout(
+        title="Combined Hyperscaler Capex — Total",
+        xaxis_title="Quarter", yaxis_title="USD billions",
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.caption(
+        "Sources: Amazon/Microsoft/Google/Meta quarterly earnings releases | "
+        "Approximate — edit `data/capex.csv` each quarter to keep current."
+    )
+
+    with st.expander("Raw data table"):
+        pivot = df.pivot(index="quarter", columns="company", values="capex_bn_usd")
+        pivot["Total"] = pivot.sum(axis=1)
+        st.dataframe(pivot.sort_index(ascending=False).style.format("{:.1f}"),
+                     use_container_width=True)
 
 
 def _tab_notes() -> None:
@@ -307,12 +350,14 @@ def main() -> None:
     prices = _load_prices()
 
     st.title("AI / Semiconductor Trade Dashboard")
-    tab_ov, tab_mem, tab_notes = st.tabs(["Overview", "Memory", "Notes"])
+    tab_ov, tab_mem, tab_cap, tab_notes = st.tabs(["Overview", "Memory", "Capex", "Notes"])
 
     with tab_ov:
         _tab_overview(prices)
     with tab_mem:
         _tab_memory(prices)
+    with tab_cap:
+        _tab_capex()
     with tab_notes:
         _tab_notes()
 
