@@ -19,7 +19,11 @@ from src.fetchers.market import fetch_prices
 _LIVE_DIR = os.path.join(os.path.dirname(__file__), "data", "live")
 _SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "data", "samples")
 _CAPEX_CSV = os.path.join(os.path.dirname(__file__), "data", "capex.csv")
+_NVIDIA_CSV = os.path.join(os.path.dirname(__file__), "data", "nvidia_segments.csv")
 _NOTES_PATH = os.path.join(os.path.dirname(__file__), "notes.md")
+
+# Tickers grouped by theme for the multiselect default
+_DEFAULT_TICKERS = ["TSM", "NVDA", "MU", "AMD", "AVGO", "SOXX"]
 
 _PRICE_STALE_DAYS = 7
 
@@ -156,6 +160,13 @@ def _tab_overview(prices: pd.DataFrame) -> None:
 
     _price_stale_banner(prices)
 
+    all_tickers = sorted(prices["ticker"].unique().tolist())
+    selected = st.multiselect(
+        "Tickers", options=all_tickers,
+        default=[t for t in _DEFAULT_TICKERS if t in all_tickers],
+        key="ov_tickers",
+    )
+
     min_date = pd.to_datetime(prices["date"].min()).date()
     max_date = pd.to_datetime(prices["date"].max()).date()
     default_start = max(min_date, (pd.Timestamp.today() - pd.DateOffset(years=1)).date())
@@ -164,13 +175,14 @@ def _tab_overview(prices: pd.DataFrame) -> None:
         "Index to 100 on:", value=default_start,
         min_value=min_date, max_value=max_date, key="overview_base",
     )
-    try:
-        st.plotly_chart(
-            _indexed_line(prices[prices["date"] >= str(base_date)], str(base_date)),
-            use_container_width=True, key="ov_indexed",
-        )
-    except ValueError as e:
-        st.error(str(e))
+    if selected:
+        try:
+            st.plotly_chart(
+                _indexed_line(prices[prices["date"] >= str(base_date)], str(base_date), selected),
+                use_container_width=True, key="ov_indexed",
+            )
+        except ValueError as e:
+            st.error(str(e))
 
     st.caption(f"Source: Yahoo Finance via yfinance | Last close: {max_date}")
 
@@ -329,6 +341,130 @@ def _tab_capex() -> None:
                      use_container_width=True)
 
 
+def _tab_gpu() -> None:
+    st.header("GPU Market")
+
+    # --- Spot price snapshot ---
+    st.subheader("Cloud GPU Spot Prices (RunPod)")
+    gpu_df = store.get_gpu_prices()
+
+    if gpu_df.empty:
+        st.info("No GPU price data yet — run `python -m src` to fetch from RunPod.")
+    else:
+        latest_date = gpu_df["fetch_date"].max()
+        current = (
+            gpu_df[gpu_df["fetch_date"] == latest_date]
+            .dropna(subset=["spot_price"])
+            .sort_values("spot_price", ascending=True)
+        )
+
+        fig_bar = go.Figure()
+        fig_bar.add_bar(
+            x=current["spot_price"], y=current["gpu_name"],
+            orientation="h",
+            text=current["spot_price"].map(lambda p: f"${p:.2f}/hr"),
+            textposition="outside",
+            marker_color="#00D4FF",
+        )
+        fig_bar.update_layout(
+            title=f"GPU Spot Price Snapshot — {latest_date}",
+            xaxis_title="USD / hr", yaxis_title="",
+            margin=dict(l=0, r=80, t=40, b=0),
+            height=380,
+        )
+        st.plotly_chart(fig_bar, use_container_width=True, key="gpu_snapshot")
+
+        # Price history (meaningful once we have multiple fetch dates)
+        dates = sorted(gpu_df["fetch_date"].unique())
+        if len(dates) > 1:
+            st.subheader("H100 SXM Spot Price — History")
+            h100 = gpu_df[gpu_df["gpu_id"] == "NVIDIA H100 80GB HBM3"].sort_values("fetch_date")
+            if not h100.empty:
+                fig_hist = go.Figure()
+                fig_hist.add_scatter(
+                    x=h100["fetch_date"], y=h100["spot_price"],
+                    mode="lines+markers", name="H100 SXM spot ($/hr)",
+                    line=dict(width=2),
+                )
+                fig_hist.update_layout(
+                    xaxis_title="Date", yaxis_title="USD / hr",
+                    margin=dict(l=0, r=0, t=0, b=0),
+                )
+                st.plotly_chart(fig_hist, use_container_width=True, key="gpu_h100_hist")
+
+        st.caption(
+            f"Source: RunPod public GraphQL API (api.runpod.io/graphql) | "
+            f"Spot = cheapest available (community > secure). "
+            f"Refreshed weekly via `python -m src`. Last fetch: {latest_date}"
+        )
+
+        with st.expander("All GPU prices table"):
+            display = current[["gpu_name", "mem_gb", "spot_price", "on_demand"]].copy()
+            display.columns = ["GPU", "VRAM (GB)", "Spot ($/hr)", "On-demand ($/hr)"]
+            st.dataframe(display.set_index("GPU").style.format("{:.2f}"),
+                         use_container_width=True)
+
+    st.divider()
+
+    # --- NVIDIA segment revenue ---
+    st.subheader("NVIDIA Revenue by Segment")
+
+    if not os.path.exists(_NVIDIA_CSV):
+        st.error(f"Missing {_NVIDIA_CSV}")
+        return
+
+    nv = pd.read_csv(_NVIDIA_CSV, comment="#")
+    segments = ["Data Center", "Gaming", "Pro Visualization", "Automotive"]
+    seg_colors = {
+        "Data Center": "#76B900",
+        "Gaming": "#00D4FF",
+        "Pro Visualization": "#FF6B35",
+        "Automotive": "#FFD700",
+    }
+
+    fig_nv = go.Figure()
+    for seg in segments:
+        sub = nv[nv["segment"] == seg].sort_values("quarter")
+        fig_nv.add_bar(
+            x=sub["quarter"], y=sub["revenue_bn_usd"],
+            name=seg, marker_color=seg_colors.get(seg),
+        )
+    fig_nv.update_layout(
+        barmode="stack",
+        title="NVIDIA Quarterly Revenue by Segment (USD bn)",
+        xaxis_title="Quarter", yaxis_title="USD billions",
+        legend=dict(orientation="h"), margin=dict(l=0, r=0, t=40, b=0),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_nv, use_container_width=True, key="nv_segments")
+
+    # Data Center as % of total — shows the AI concentration story
+    totals = nv.groupby("quarter")["revenue_bn_usd"].sum().rename("total")
+    dc = nv[nv["segment"] == "Data Center"].set_index("quarter")["revenue_bn_usd"]
+    pct = (dc / totals * 100).reset_index()
+    pct.columns = ["quarter", "dc_pct"]
+    pct = pct.sort_values("quarter")
+
+    fig_pct = go.Figure()
+    fig_pct.add_scatter(
+        x=pct["quarter"], y=pct["dc_pct"],
+        mode="lines+markers", name="Data Center % of revenue",
+        line=dict(width=2, color="#76B900"),
+    )
+    fig_pct.update_layout(
+        title="Data Center as % of NVIDIA Total Revenue",
+        xaxis_title="Quarter", yaxis_title="%", yaxis_ticksuffix="%",
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    st.plotly_chart(fig_pct, use_container_width=True, key="nv_dc_pct")
+
+    st.caption(
+        "Source: NVIDIA quarterly earnings releases (investor.nvidia.com) | "
+        "Approximate — NVDA fiscal year ends Jan; mapped to calendar quarters. "
+        "Update `data/nvidia_segments.csv` each quarter."
+    )
+
+
 def _tab_notes() -> None:
     st.header("Notes")
     if not os.path.exists(_NOTES_PATH):
@@ -350,7 +486,9 @@ def main() -> None:
     prices = _load_prices()
 
     st.title("AI / Semiconductor Trade Dashboard")
-    tab_ov, tab_mem, tab_cap, tab_notes = st.tabs(["Overview", "Memory", "Capex", "Notes"])
+    tab_ov, tab_mem, tab_cap, tab_gpu, tab_notes = st.tabs(
+        ["Overview", "Memory", "Capex", "GPU", "Notes"]
+    )
 
     with tab_ov:
         _tab_overview(prices)
@@ -358,6 +496,8 @@ def main() -> None:
         _tab_memory(prices)
     with tab_cap:
         _tab_capex()
+    with tab_gpu:
+        _tab_gpu()
     with tab_notes:
         _tab_notes()
 

@@ -16,6 +16,7 @@ import pandas as pd
 import src.store as store
 from src.fetchers.korea import fetch_exports
 from src.fetchers.market import fetch_prices
+from src.fetchers.runpod import fetch_gpu_prices
 from src.fetchers.tsmc import fetch_revenue
 
 _LIVE_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "live")
@@ -65,7 +66,18 @@ def refresh() -> None:
         print("  ✗ Price fetch failed")
         hard_fail.append("Prices")
 
-    ok = [s for s in ["TSMC", "Korea", "Prices"]
+    # --- GPU spot prices ---
+    print("Fetching GPU spot prices from RunPod...")
+    gpu_df = fetch_gpu_prices()
+    if gpu_df is not None and not gpu_df.empty:
+        store.upsert_gpu_prices(gpu_df)
+        _export_csv(gpu_df, "gpu_spot_prices.csv")
+        print(f"  ✓ {len(gpu_df)} rows  →  data/live/gpu_spot_prices.csv")
+    else:
+        print("  ✗ GPU price fetch failed")
+        soft_fail.append("GPU")
+
+    ok = [s for s in ["TSMC", "Korea", "Prices", "GPU"]
           if s not in hard_fail and s not in soft_fail]
     print(f"\nDone.  OK: {ok or '—'}  |  Soft fail: {soft_fail or '—'}  |  Hard fail: {hard_fail or '—'}")
 

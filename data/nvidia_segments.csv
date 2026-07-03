@@ -1,0 +1,57 @@
+# NVIDIA quarterly revenue by segment (USD billions).
+# Mapped to calendar quarters (NVDA fiscal year ends Jan; FY25 Q4 Jan 2025 → 2024-Q4).
+# Update each quarter from earnings releases at investor.nvidia.com.
+# Segments: Data Center, Gaming, Pro Visualization, Automotive
+quarter,segment,revenue_bn_usd
+2022-Q1,Data Center,3.75
+2022-Q1,Gaming,3.62
+2022-Q1,Pro Visualization,0.62
+2022-Q1,Automotive,0.14
+2022-Q2,Data Center,3.81
+2022-Q2,Gaming,2.04
+2022-Q2,Pro Visualization,0.50
+2022-Q2,Automotive,0.22
+2022-Q3,Data Center,3.83
+2022-Q3,Gaming,1.57
+2022-Q3,Pro Visualization,0.20
+2022-Q3,Automotive,0.25
+2022-Q4,Data Center,3.62
+2022-Q4,Gaming,1.83
+2022-Q4,Pro Visualization,0.23
+2022-Q4,Automotive,0.29
+2023-Q1,Data Center,4.28
+2023-Q1,Gaming,2.24
+2023-Q1,Pro Visualization,0.30
+2023-Q1,Automotive,0.30
+2023-Q2,Data Center,10.32
+2023-Q2,Gaming,2.49
+2023-Q2,Pro Visualization,0.38
+2023-Q2,Automotive,0.36
+2023-Q3,Data Center,14.51
+2023-Q3,Gaming,2.86
+2023-Q3,Pro Visualization,0.46
+2023-Q3,Automotive,0.26
+2023-Q4,Data Center,18.40
+2023-Q4,Gaming,3.28
+2023-Q4,Pro Visualization,0.46
+2023-Q4,Automotive,0.28
+2024-Q1,Data Center,22.60
+2024-Q1,Gaming,3.76
+2024-Q1,Pro Visualization,0.43
+2024-Q1,Automotive,0.33
+2024-Q2,Data Center,26.30
+2024-Q2,Gaming,3.31
+2024-Q2,Pro Visualization,0.45
+2024-Q2,Automotive,0.35
+2024-Q3,Data Center,30.77
+2024-Q3,Gaming,3.28
+2024-Q3,Pro Visualization,0.49
+2024-Q3,Automotive,0.45
+2024-Q4,Data Center,35.58
+2024-Q4,Gaming,3.53
+2024-Q4,Pro Visualization,0.51
+2024-Q4,Automotive,0.57
+2025-Q1,Data Center,39.08
+2025-Q1,Gaming,3.80
+2025-Q1,Pro Visualization,0.51
+2025-Q1,Automotive,0.57

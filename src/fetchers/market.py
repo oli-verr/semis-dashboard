@@ -5,7 +5,16 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 
-TICKERS = ["TSM", "NVDA", "MU", "AMD", "AVGO", "ALAB", "SOXX", "000660.KS", "005930.KS"]
+TICKERS = [
+    # Core semis / AI
+    "TSM", "NVDA", "AMD", "AVGO", "ALAB",
+    # Memory
+    "MU", "000660.KS", "005930.KS",
+    # Broader AI stack
+    "SMCI", "MRVL", "ARM", "ASML",
+    # Index proxy
+    "SOXX",
+]
 
 _RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
 

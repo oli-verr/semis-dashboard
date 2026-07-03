@@ -38,6 +38,15 @@ def init_db() -> None:
                 nand_tlc     REAL,   -- 128Gb TLC NAND, USD cents/GB
                 notes        TEXT
             );
+            CREATE TABLE IF NOT EXISTS gpu_spot_prices (
+                fetch_date TEXT,
+                gpu_id     TEXT,
+                gpu_name   TEXT,
+                mem_gb     INTEGER,
+                spot_price REAL,    -- cheapest spot (community > secure)
+                on_demand  REAL,    -- cheapest on-demand
+                PRIMARY KEY (fetch_date, gpu_id)
+            );
         """)
 
 
@@ -87,6 +96,21 @@ def upsert_memory_price(date: str, dram: float | None, nand: float | None, notes
             "INSERT OR REPLACE INTO memory_prices (date, dram_ddr5, nand_tlc, notes) VALUES (?, ?, ?, ?)",
             (date, dram, nand, notes),
         )
+
+
+def upsert_gpu_prices(df: pd.DataFrame) -> None:
+    with _conn() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO gpu_spot_prices "
+            "(fetch_date, gpu_id, gpu_name, mem_gb, spot_price, on_demand) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            df[["fetch_date", "gpu_id", "gpu_name", "mem_gb", "spot_price", "on_demand"]].values.tolist(),
+        )
+
+
+def get_gpu_prices() -> pd.DataFrame:
+    with _conn() as conn:
+        return pd.read_sql("SELECT * FROM gpu_spot_prices ORDER BY fetch_date, gpu_name", conn)
 
 
 def get_memory_prices() -> pd.DataFrame:
