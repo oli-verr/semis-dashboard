@@ -39,3 +39,45 @@ A working Streamlit dashboard with three tabs (Overview, Memory, Notes), backed 
 - Real Korea exports via ECOS API (`ECOS_API_KEY` in `.env`)
 - `python -m src.refresh` CLI command
 - GitHub Actions cron
+
+---
+
+## Phase 2 — Real Fetchers (2026-07-03)
+
+### What was built
+TSMC scraper is live. `python -m src` now refreshes all data sources. Korea is wired but blocked on API key registration.
+
+### TSMC scraper (`src/fetchers/tsmc.py`)
+Scrapes `https://investor.tsmc.com/english/monthly-revenue/{year}` per year. The page is server-rendered so plain requests + BeautifulSoup works. Fetches the last 3 calendar years by default (currently 2024, 2025, 2026). Parses the `basicTable` class, converts month abbreviations to YYYY-MM dates, skips future months (empty cells).
+
+The DB now has 29 rows of live TSMC data from 2024-01 through 2026-05. The "SAMPLE DATA" banner will disappear in the app.
+
+6 HTML fixture tests all pass (fixture saved in `tests/fixtures/tsmc_2024.html`).
+
+### Korea exports (`src/fetchers/korea.py`)
+Written to call the Bank of Korea ECOS API. Reads `ECOS_API_KEY` from `.env`. Returns None gracefully when key is absent — the app stays on sample data with a banner.
+
+**Pending**: Verify the ECOS series code. The fetcher is configured with:
+- Table: `242Y001` (Merchandise Trade by Commodity)
+- Item: `19` (Semiconductors)
+
+Until you register at ecos.bok.or.kr and add your key to `.env`, Korea data stays on sample. Once you have the key, run `python -m src` and check if data comes back. If the item code `19` is wrong (ECOS error code INFO-200 or similar), browse `https://ecos.bok.or.kr/#/SearchStat` for the correct semiconductor export series and update `_ITEM_CODE` in `src/fetchers/korea.py`.
+
+### `python -m src` refresh command (`src/__main__.py`)
+Runs all three fetchers in sequence, prints status, exits 1 if any source fails (useful for CI alerting in Phase 3). Currently outputs:
+```
+TSMC   ✓  29 rows
+Korea  ✗  no key
+Prices ✓  4477 rows
+```
+
+### Bug fixed in `market.py`
+yfinance's `reset_index()` column name varies by version. Fixed by taking `reset.columns[0]` instead of hardcoding "Date".
+
+### What to review
+1. **TSMC banner gone** — Overview tab should now show real data without the warning.
+2. **Korea banner stays** — will clear after adding `ECOS_API_KEY` to `.env` and re-running refresh.
+3. **`src/__main__.py`** — tiny script; read it to understand the refresh flow before Phase 3 automation.
+
+### Known ECOS series code uncertainty
+The item code `19` for semiconductors within table `242Y001` is a best-effort guess — the ECOS sample API key does not have sufficient permissions to browse item lists. Needs verification with a real key.

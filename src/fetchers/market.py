@@ -27,13 +27,12 @@ def fetch_prices(start_date: str | None = None) -> pd.DataFrame:
 
     # Long format: one row per (date, ticker)
     closes.index = closes.index.strftime("%Y-%m-%d")
-    long = (
-        closes.reset_index()
-        .rename(columns={"Date": "date", "Datetime": "date", "Price": "date"})
-        .melt(id_vars=closes.index.name or "Date", var_name="ticker", value_name="close")
+    reset = closes.reset_index()
+    # The date column may be named "Date", "Datetime", or "Price" depending on yfinance version
+    date_col = reset.columns[0]
+    long = reset.rename(columns={date_col: "date"}).melt(
+        id_vars="date", var_name="ticker", value_name="close"
     )
-    # Normalise the date column name regardless of yfinance version quirks
-    long.columns = ["date", "ticker", "close"]
     long = long.dropna(subset=["close"]).reset_index(drop=True)
 
     os.makedirs(_RAW_DIR, exist_ok=True)
